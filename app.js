@@ -200,26 +200,29 @@ function startCameraScan() {
 function stopCameraScan() {
   const videoBox = document.getElementById("videoBox");
 
-  if (scanner) {
-    scanner
+  if (qrScanner) {
+    qrScanner
       .stop()
       .then(() => {
-        scanner.destroy();
-        scanner = null;
+        qrScanner.destroy();
+        qrScanner = null;
         isCameraRunning = false;
-        videoBox.hidden = true;
       })
       .catch((err) => {
-        console.warn("Erreur à l'arrêt de la caméra:", err);
-        scanner = null;
+        console.warn("Erreur à l'arrêt du scanner caméra :", err);
+        qrScanner.destroy();
+        qrScanner = null;
         isCameraRunning = false;
-        videoBox.hidden = true;
       });
   } else {
     isCameraRunning = false;
+  }
+
+  if (videoBox) {
     videoBox.hidden = true;
   }
 }
+
 
 // --- Lecture depuis fichier image (QrScanner.scanImage) ---
 
