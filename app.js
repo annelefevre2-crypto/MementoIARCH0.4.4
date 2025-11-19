@@ -30,23 +30,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
 // Helper : vérifie la présence de la lib Html5Qrcode
 function ensureHtml5QrCodeInstance() {
-  if (typeof Html5Qrcode === "undefined") {
-    throw new Error(
-      "Html5Qrcode n'est pas chargé (vérifier le chargement du script)."
-    );
+  if (!window.Html5Qrcode) {
+    throw new Error("La bibliothèque Html5Qrcode n'est pas chargée.");
   }
   if (!html5QrCode) {
-    // Configuration légèrement plus robuste
+    // On utilise un conteneur DIV (et non pas directement <video>)
+    const cameraContainer = document.getElementById("camera");
+    if (!cameraContainer) {
+      throw new Error("Élément #camera introuvable dans le DOM.");
+    }
+
     try {
-      html5QrCode = new Html5Qrcode("camera", {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE
-        ],
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true
-        },
-        verbose: false
-      });
+      const config = {
+        verbose: false,
+      };
+      html5QrCode = new Html5Qrcode("camera", config);
     } catch (e) {
       // fallback minimal si la config avancée pose problème
       console.warn("Configuration avancée Html5Qrcode impossible, fallback simple :", e);
@@ -69,26 +67,24 @@ function initTabs() {
       const target = btn.getAttribute("data-tab");
 
       tabButtons.forEach((b) => b.classList.remove("tab-button--active"));
-      btn.classList.add("tab-button--active");
+      tabPanels.forEach((p) => p.classList.remove("tab-panel--active"));
 
-      tabPanels.forEach((panel) => {
-        if (panel.id === `tab-${target}`) {
-          panel.classList.add("tab-panel--active");
-        } else {
-          panel.classList.remove("tab-panel--active");
-        }
-      });
+      btn.classList.add("tab-button--active");
+      document.getElementById(`tab-${target}`).classList.add("tab-panel--active");
+
+      if (target !== "scan") {
+        stopCameraScan();
+      }
     });
   });
 }
 
 // =============================
-// Vue Scan / Lecture
+// Lecture / Scan
 // =============================
 
 function initScanView() {
   const cameraBtn = document.getElementById("cameraBtn");
-  const scanBtn = document.getElementById("scanBtn");
   const resetBtn = document.getElementById("resetBtn");
   const qrFileInput = document.getElementById("qrFile");
   const generatePromptBtn = document.getElementById("generatePromptBtn");
@@ -98,26 +94,50 @@ function initScanView() {
   const btnPerplexity = document.getElementById("btnPerplexity");
   const btnMistral = document.getElementById("btnMistral");
 
-  cameraBtn.addEventListener("click", startCameraScan);
-  scanBtn.addEventListener("click", () => {
-    if (!isCameraRunning) startCameraScan();
+  // Un seul bouton pour lancer la caméra
+  cameraBtn.addEventListener("click", () => {
+    if (!isCameraRunning) {
+      startCameraScan();
+    }
   });
+
+  // Le reset arrête la caméra et nettoie l'onglet
   resetBtn.addEventListener("click", resetScanView);
 
+  // Lecture d'un QR code depuis un fichier image
   qrFileInput.addEventListener("change", (event) => {
     const file = event.target.files[0];
     if (file) scanQrFromFile(file);
   });
 
+  // Mise à jour dynamique de l'aperçu du prompt
   infosComplementaires.addEventListener("input", () => updatePromptPreview());
 
   generatePromptBtn.addEventListener("click", () =>
     updatePromptPreview(true)
   );
 
+  // Boutons d'envoi vers les IA
   btnChatgpt.addEventListener("click", () => openIa("chatgpt"));
   btnPerplexity.addEventListener("click", () => openIa("perplexity"));
   btnMistral.addEventListener("click", () => openIa("mistral"));
+
+  setIaButtonsState(null);
+}
+
+function resetScanView() {
+  stopCameraScan();
+  currentFiche = null;
+  currentVariablesValues = {};
+
+  document.getElementById("ficheMeta").textContent = "Aucune fiche scannée";
+  document.getElementById("ficheMeta").classList.add("fiche-meta--empty");
+  document.getElementById("variablesContainer").innerHTML = "";
+  document.getElementById("infosComplementaires").value = "";
+  document.getElementById("compiledPrompt").value = "";
+  document.getElementById("cameraError").hidden = true;
+  document.getElementById("cameraError").textContent = "";
+  document.getElementById("qrFile").value = "";
 
   setIaButtonsState(null);
 }
@@ -203,629 +223,443 @@ function scanQrFromFile(file) {
   try {
     qr = ensureHtml5QrCodeInstance();
   } catch (err) {
-    cameraError.textContent = "Erreur Html5Qrcode : " + err.message;
+    cameraError.textContent = "Erreur Html5Qrcode (fichier) : " + err.message;
     cameraError.hidden = false;
     return;
   }
 
-  if (isCameraRunning) stopCameraScan();
-
-  qr
-    // true → affiche l'image et permet parfois une meilleure analyse
-    .scanFile(file, true)
-    .then((decodedText) => {
-      handleQrDecoded(decodedText);
-      qr.clear();
-      html5QrCode = null;
-    })
-    .catch((err) => {
-      console.error("Erreur scanFile :", err);
-      cameraError.textContent =
-        "Impossible de lire le QR depuis le fichier. " +
-        "L'image est probablement trop petite, floue ou le code trop dense. " +
-        "Essayez avec le PNG généré en 400×400 ou plus. " +
-        "Détail technique : " +
-        (err?.message || err);
-      cameraError.hidden = false;
-    });
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    qr
+      .scanFileV2(dataUrl, false)
+      .then((decoded) => {
+        handleQrDecoded(decoded.text || decoded);
+      })
+      .catch((err) => {
+        cameraError.textContent =
+          "Impossible de lire le QR depuis le fichier : " +
+          (err?.message || err);
+        cameraError.hidden = false;
+      });
+  };
+  reader.readAsDataURL(file);
 }
 
-// --- Traitement du JSON issu du QR ---
+// --- Traitement du QR lu ---
 
 function handleQrDecoded(decodedText) {
   let obj;
   try {
-    obj = JSON.parse(decodedText);
-  } catch (e) {
-    alert("Le QR code ne contient pas un JSON valide.\nDétail : " + e.message);
+    obj = decodeFicheFromPayload(decodedText);
+  } catch (err) {
+    alert("Erreur de décodage de la fiche : " + err.message);
     return;
   }
-
-  // 1) Nouveau format : wrapper compressé { z: "pako-base64-v1", d: "<base64>" }
-  if (obj && obj.z === "pako-base64-v1" && obj.d) {
-    try {
-      const compactJson = decompressFromBase64(obj.d);
-      const compactObj = JSON.parse(compactJson);
-      obj =
-        compactObj && compactObj.ti && !compactObj.titre
-          ? expandCompactSchema(compactObj)
-          : compactObj;
-    } catch (e) {
-      alert(
-        "Impossible de décompresser les données du QR code.\nDétail : " +
-          e.message
-      );
-      return;
-    }
-  }
-  // 2) Ancien format compact non compressé (ti/obj/v/ic)
-  else if (obj && obj.ti && !obj.titre) {
-    obj = expandCompactSchema(obj);
-  }
-  // 3) Sinon : on suppose déjà le schéma "long" compatible.
 
   currentFiche = obj;
   currentVariablesValues = {};
-
-  renderFicheMeta();
-  renderVariablesForm();
+  renderFicheMeta(obj);
+  renderVariablesForm(obj);
   updatePromptPreview();
-  setIaButtonsState(currentFiche.indices_confiance || null);
 }
 
-// --- Affichage méta fiche ---
+// Décodage multi-format (ancien / compact / compressé)
+function decodeFicheFromPayload(payload) {
+  let jsonText = payload;
 
-function renderFicheMeta() {
-  const ficheMeta = document.getElementById("ficheMeta");
-
-  if (!currentFiche) {
-    ficheMeta.textContent = "Aucune fiche scannée";
-    ficheMeta.classList.add("fiche-meta--empty");
-    return;
+  if (payload.startsWith("{")) {
+    // JSON direct
+  } else {
+    // Peut-être wrapper compressé
+    try {
+      const wrapper = JSON.parse(payload);
+      if (wrapper && wrapper.z === "pako-base64-v1" && wrapper.d) {
+        const bin = atob(wrapper.d);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) {
+          arr[i] = bin.charCodeAt(i);
+        }
+        const inflated = pako.inflate(arr, { to: "string" });
+        jsonText = inflated;
+      } else {
+        throw new Error("Wrapper inconnu");
+      }
+    } catch (e) {
+      throw new Error(
+        "Format de fiche non reconnu ou compression invalide : " + e.message
+      );
+    }
   }
 
-  const { categorie, titre, objectif, concepteur, date_maj, version } =
-    currentFiche;
-
-  const parts = [];
-  if (categorie) parts.push("<strong>" + escapeHtml(categorie) + "</strong>");
-  if (titre) parts.push("<span>" + escapeHtml(titre) + "</span>");
-  if (objectif) parts.push("<br><em>" + escapeHtml(objectif) + "</em>");
-  if (version || date_maj || concepteur) {
-    const metaParts = [];
-    if (version) metaParts.push("Version " + escapeHtml(version));
-    if (date_maj) metaParts.push("MAJ : " + escapeHtml(date_maj));
-    if (concepteur) metaParts.push("Concepteur : " + escapeHtml(concepteur));
-    parts.push("<br><span>" + metaParts.join(" — ") + "</span>");
+  let fiche;
+  try {
+    fiche = JSON.parse(jsonText);
+  } catch (e) {
+    throw new Error("JSON de fiche invalide : " + e.message);
   }
 
-  ficheMeta.innerHTML = parts.join(" ");
-  ficheMeta.classList.remove("fiche-meta--empty");
+  if (!fiche.titre || !fiche.version) {
+    throw new Error("Fiche incomplète : titre ou version manquants.");
+  }
+
+  fiche.variables = fiche.variables || [];
+  return fiche;
 }
 
-// --- Formulaire de variables (lecture) ---
+// --- Rendu fiche & formulaires ---
 
-function renderVariablesForm() {
+function renderFicheMeta(fiche) {
+  const metaEl = document.getElementById("ficheMeta");
+  metaEl.classList.remove("fiche-meta--empty");
+  metaEl.innerHTML = `
+    <div class="fiche-meta-title">${escapeHtml(fiche.titre || "Sans titre")}</div>
+    <div class="fiche-meta-details">
+      <span>Version : ${escapeHtml(fiche.version || "?")}</span>
+      ${
+        fiche.categorie
+          ? `<span>Catégorie : ${escapeHtml(fiche.categorie)}</span>`
+          : ""
+      }
+      ${
+        fiche.objectif
+          ? `<span>Objectif : ${escapeHtml(fiche.objectif)}</span>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderVariablesForm(fiche) {
   const container = document.getElementById("variablesContainer");
   container.innerHTML = "";
 
-  if (!currentFiche || !Array.isArray(currentFiche.variables)) return;
+  if (!fiche.variables || fiche.variables.length === 0) {
+    const p = document.createElement("p");
+    p.textContent = "Aucun champ d'entrée défini pour cette fiche.";
+    p.className = "helper-text";
+    container.appendChild(p);
+    return;
+  }
 
-  currentFiche.variables.slice(0, 10).forEach((variable) => {
-    const { id, label, type = "text", obligatoire = false, placeholder = "" } =
-      variable;
-    if (!id) return;
+  fiche.variables.forEach((v, index) => {
+    const row = document.createElement("div");
+    row.className = "variable-row";
 
-    const fieldDiv = document.createElement("div");
-    fieldDiv.className = "variable-field";
+    const label = document.createElement("label");
+    label.className = "section-label";
+    const obligatoire = v.obligatoire === true ? " (obligatoire)" : "";
+    label.textContent = (v.nom || `Champ ${index + 1}`) + obligatoire;
 
-    const labelEl = document.createElement("label");
-    labelEl.className = "variable-label";
-    labelEl.setAttribute("for", "var-" + id);
-    labelEl.textContent = label || id;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "input";
+    input.placeholder = v.placeholder || "";
+    input.value = "";
 
-    if (obligatoire) {
-      const star = document.createElement("span");
-      star.className = "obligatoire";
-      star.textContent = "*";
-      labelEl.appendChild(star);
-    }
-
-    let inputEl;
-    if (type === "number") {
-      inputEl = document.createElement("input");
-      inputEl.type = "number";
-    } else if (type === "file") {
-      inputEl = document.createElement("input");
-      inputEl.type = "file";
-    } else {
-      inputEl = document.createElement("input");
-      inputEl.type = "text";
-    }
-
-    inputEl.id = "var-" + id;
-    inputEl.dataset.varId = id;
-    inputEl.dataset.varObligatoire = String(obligatoire);
-    inputEl.placeholder = placeholder || "";
-
-    inputEl.addEventListener("input", () => {
-      currentVariablesValues[id] =
-        inputEl.type === "file"
-          ? (inputEl.files && inputEl.files[0] && inputEl.files[0].name) || ""
-          : inputEl.value;
+    input.addEventListener("input", () => {
+      currentVariablesValues[v.id || v.nom || `var_${index}`] = input.value;
       updatePromptPreview();
     });
 
-    fieldDiv.appendChild(labelEl);
-    fieldDiv.appendChild(inputEl);
-    container.appendChild(fieldDiv);
+    row.appendChild(label);
+    row.appendChild(input);
+    container.appendChild(row);
   });
 }
 
-// --- Construction du prompt final ---
+// --- Génération du prompt ---
 
-function buildPrompt() {
-  if (!currentFiche || !currentFiche.prompt) return "";
-
-  let prompt = currentFiche.prompt;
-
-  if (Array.isArray(currentFiche.variables)) {
-    currentFiche.variables.forEach((v) => {
-      if (!v.id) return;
-      const value = currentVariablesValues[v.id] || "";
-      const placeholder = new RegExp(
-        "{{\\s*" + escapeRegex(v.id) + "\\s*}}",
-        "g"
-      );
-      prompt = prompt.replace(placeholder, value);
-    });
+function updatePromptPreview(force = false) {
+  if (!currentFiche) {
+    document.getElementById("compiledPrompt").value = "";
+    setIaButtonsState(null);
+    return;
   }
 
-  const infosComplementaires = document.getElementById("infosComplementaires");
-  const extra = infosComplementaires.value.trim();
-  if (extra) {
-    prompt += "\n\nInformations complémentaires : " + extra;
-  }
+  const infosCompl = document
+    .getElementById("infosComplementaires")
+    .value.trim();
 
-  return prompt;
-}
+  let prompt = currentFiche.prompt || "";
+  const vars = currentFiche.variables || [];
 
-function updatePromptPreview(scrollToPrompt = false) {
-  const compiledPrompt = document.getElementById("compiledPrompt");
-  const promptFinal = buildPrompt();
-  compiledPrompt.value = promptFinal || "";
-
-  const allRequiredFilled = checkAllRequiredVariablesFilled();
-  if (!allRequiredFilled) {
-    setIaButtonsDisableAll();
-  } else {
-    const indices = currentFiche && currentFiche.indices_confiance;
-    setIaButtonsState(indices || null);
-  }
-
-  if (scrollToPrompt) {
-    compiledPrompt.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-}
-
-function checkAllRequiredVariablesFilled() {
-  if (!currentFiche || !Array.isArray(currentFiche.variables)) return false;
-
-  return currentFiche.variables.every((v) => {
-    if (!v.obligatoire) return true;
-    const value = currentVariablesValues[v.id];
-    return value !== undefined && String(value).trim() !== "";
+  vars.forEach((v, index) => {
+    const key = v.id || v.nom || `var_${index}`;
+    const val = currentVariablesValues[key] || "";
+    const token = `{{${key}}}`;
+    prompt = prompt.replaceAll(token, val);
   });
+
+  if (infosCompl) {
+    prompt += `\n\nInformations complémentaires transmises par le COS :\n${infosCompl}`;
+  }
+
+  document.getElementById("compiledPrompt").value = prompt;
+  setIaButtonsState(prompt ? "ready" : null);
 }
 
 // --- Boutons IA ---
 
-function setIaButtonsDisableAll() {
+function setIaButtonsState(state) {
   const btnChatgpt = document.getElementById("btnChatgpt");
   const btnPerplexity = document.getElementById("btnPerplexity");
   const btnMistral = document.getElementById("btnMistral");
+  const enabled = state === "ready";
 
   [btnChatgpt, btnPerplexity, btnMistral].forEach((btn) => {
-    btn.disabled = true;
-    btn.classList.remove("btn-ia--level3", "btn-ia--level2");
-    btn.classList.add("btn-ia--disabled");
+    if (!btn) return;
+    btn.disabled = !enabled;
   });
 }
 
-function setIaButtonsState(indices) {
-  const btnChatgpt = document.getElementById("btnChatgpt");
-  const btnPerplexity = document.getElementById("btnPerplexity");
-  const btnMistral = document.getElementById("btnMistral");
+function openIa(type) {
+  const prompt = document.getElementById("compiledPrompt").value.trim();
+  if (!prompt) return;
 
-  if (!currentFiche || !indices) {
-    setIaButtonsDisableAll();
-    return;
-  }
+  const encoded = encodeURIComponent(prompt);
 
-  const applyState = (btn, level) => {
-    btn.classList.remove("btn-ia--level3", "btn-ia--level2", "btn-ia--disabled");
-    if (level === 3) {
-      btn.disabled = false;
-      btn.classList.add("btn-ia--level3");
-    } else if (level === 2) {
-      btn.disabled = false;
-      btn.classList.add("btn-ia--level2");
-    } else {
-      btn.disabled = true;
-      btn.classList.add("btn-ia--disabled");
-    }
-  };
-
-  const lvlChatgpt = normalizeIndice(indices.chatgpt);
-  const lvlPerplexity = normalizeIndice(indices.perplexity);
-  const lvlMistral = normalizeIndice(indices.mistral);
-
-  applyState(btnChatgpt, lvlChatgpt);
-  applyState(btnPerplexity, lvlPerplexity);
-  applyState(btnMistral, lvlMistral);
-}
-
-function normalizeIndice(value) {
-  const n = Number(value);
-  if (n === 3 || n === 2 || n === 1) return n;
-  return 1;
-}
-
-function openIa(iaKey) {
-  if (!currentFiche) return;
-
-  const promptFinal = buildPrompt();
-  if (!promptFinal) {
-    alert("Le prompt est vide. Veuillez remplir les champs de la fiche.");
-    return;
-  }
-
-  const encoded = encodeURIComponent(promptFinal);
   let url = "";
-
-  switch (iaKey) {
+  switch (type) {
     case "chatgpt":
-      url = "https://chatgpt.com/?q=" + encoded;
+      url = `https://chat.openai.com/?q=${encoded}`;
       break;
     case "perplexity":
-      url = "https://www.perplexity.ai/search?q=" + encoded;
+      url = `https://www.perplexity.ai/?q=${encoded}`;
       break;
     case "mistral":
-      url = "https://chat.mistral.ai/chat?q=" + encoded;
+      url = `https://chat.mistral.ai/chat?prompt=${encoded}`;
       break;
     default:
       return;
   }
 
-  window.open(url, "_blank", "noopener");
-}
-
-function resetScanView() {
-  stopCameraScan();
-  currentFiche = null;
-  currentVariablesValues = {};
-
-  document.getElementById("ficheMeta").textContent = "Aucune fiche scannée";
-  document.getElementById("ficheMeta").classList.add("fiche-meta--empty");
-  document.getElementById("variablesContainer").innerHTML = "";
-  document.getElementById("infosComplementaires").value = "";
-  document.getElementById("compiledPrompt").value = "";
-  document.getElementById("cameraError").hidden = true;
-  document.getElementById("cameraError").textContent = "";
-  document.getElementById("qrFile").value = "";
-
-  setIaButtonsState(null);
+  window.open(url, "_blank");
 }
 
 // =============================
-// Vue Création de fiche / QR
+// Création de fiche
 // =============================
 
 function initCreateView() {
   const addVariableBtn = document.getElementById("addVariableBtn");
-  const generateQrBtn = document.getElementById("generateQrBtn");
+  const generateJsonBtn = document.getElementById("generateJsonBtn");
+  const copyJsonBtn = document.getElementById("copyJsonBtn");
   const downloadQrBtn = document.getElementById("downloadQrBtn");
 
-  addVariableRow();
-
   addVariableBtn.addEventListener("click", addVariableRow);
-  generateQrBtn.addEventListener("click", generateJsonAndQr);
-  downloadQrBtn.addEventListener("click", downloadGeneratedQr);
+
+  generateJsonBtn.addEventListener("click", () => {
+    const fiche = collectFicheFromForm();
+    if (!fiche) return;
+
+    const jsonCompact = createCompactFicheJson(fiche);
+    const payload = createCompressedPayload(jsonCompact);
+
+    const output = {
+      fiche,
+      compact: jsonCompact,
+      payload,
+    };
+
+    const jsonOutputEl = document.getElementById("jsonOutput");
+    jsonOutputEl.value = JSON.stringify(output, null, 2);
+    copyJsonBtn.disabled = false;
+
+    generateQrCode(payload);
+  });
+
+  copyJsonBtn.addEventListener("click", () => {
+    const jsonOutputEl = document.getElementById("jsonOutput");
+    if (!jsonOutputEl.value) return;
+    navigator.clipboard
+      .writeText(jsonOutputEl.value)
+      .then(() => {
+        alert("JSON copié dans le presse-papier.");
+      })
+      .catch((err) => {
+        console.error("Erreur lors de la copie :", err);
+      });
+  });
+
+  downloadQrBtn.addEventListener("click", () => {
+    const canvas = document.querySelector("#generatedQr canvas");
+    if (!canvas) return;
+
+    const link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = "fiche-qr.png";
+    link.click();
+  });
 }
 
-// Ajoute une ligne de variable dans le builder (max 10)
-function addVariableRow() {
-  const builder = document.getElementById("variablesBuilder");
-  const currentRows = builder.querySelectorAll(".variable-row");
+// --- Ajout / collecte des variables ---
 
-  if (currentRows.length >= 10) {
-    alert("Vous avez atteint le nombre maximal de 10 variables.");
-    return;
-  }
+function addVariableRow() {
+  const container = document.getElementById("variablesCreateContainer");
 
   const row = document.createElement("div");
-  row.className = "variable-row";
+  row.className = "variable-row variable-row--create";
 
-  const inputLabel = document.createElement("input");
-  inputLabel.type = "text";
-  inputLabel.placeholder = "Label (ex : Code ONU)";
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.placeholder = "Nom du champ (ex : Code ONU)";
+  nameInput.className = "input variable-input-name";
 
-  const inputId = document.createElement("input");
-  inputId.type = "text";
-  inputId.placeholder = "Identifiant (ex : code_onu)";
+  const idInput = document.createElement("input");
+  idInput.type = "text";
+  idInput.placeholder = "Identifiant (ex : code_onu)";
+  idInput.className = "input variable-input-id";
 
-  const selectType = document.createElement("select");
-  ["text", "number", "geoloc", "file"].forEach((t) => {
-    const opt = document.createElement("option");
-    opt.value = t;
-    opt.textContent = t;
-    selectType.appendChild(opt);
-  });
+  const placeholderInput = document.createElement("input");
+  placeholderInput.type = "text";
+  placeholderInput.placeholder = "Texte d'aide / exemple";
+  placeholderInput.className = "input variable-input-placeholder";
 
-  const requiredContainer = document.createElement("div");
-  requiredContainer.className = "var-required";
+  const obligatoireSelect = document.createElement("select");
+  obligatoireSelect.className = "input variable-input-obligatoire";
+  obligatoireSelect.innerHTML = `
+    <option value="false">Facultatif</option>
+    <option value="true">Obligatoire</option>
+  `;
 
-  const checkboxRequired = document.createElement("input");
-  checkboxRequired.type = "checkbox";
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "btn btn-ghost";
+  removeBtn.textContent = "Supprimer";
+  removeBtn.addEventListener("click", () => row.remove());
 
-  const labelRequired = document.createElement("label");
-  labelRequired.textContent = "Obligatoire";
+  row.appendChild(nameInput);
+  row.appendChild(idInput);
+  row.appendChild(placeholderInput);
+  row.appendChild(obligatoireSelect);
+  row.appendChild(removeBtn);
 
-  requiredContainer.appendChild(checkboxRequired);
-  requiredContainer.appendChild(labelRequired);
-
-  const deleteBtn = document.createElement("button");
-  deleteBtn.type = "button";
-  deleteBtn.className = "btn btn-secondary";
-  deleteBtn.textContent = "Supprimer";
-  deleteBtn.addEventListener("click", () => row.remove());
-
-  row.appendChild(inputLabel);
-  row.appendChild(inputId);
-  row.appendChild(selectType);
-  row.appendChild(requiredContainer);
-  row.appendChild(deleteBtn);
-
-  builder.appendChild(row);
+  container.appendChild(row);
 }
 
-// Génération du JSON + QR
-function generateJsonAndQr() {
-  const errorBox = document.getElementById("createError");
-  const jsonTextarea = document.getElementById("generatedJson");
-  const qrContainer = document.getElementById("generatedQr");
-  const downloadBtn = document.getElementById("downloadQrBtn");
+function collectFicheFromForm() {
+  const titre = document.getElementById("ficheTitre").value.trim();
+  const categorie = document.getElementById("ficheCategorie").value.trim();
+  const version = document.getElementById("ficheVersion").value.trim();
+  const objectif = document.getElementById("ficheObjectif").value.trim();
+  const references = document.getElementById("ficheReferences").value.trim();
+  const promptBrut = document.getElementById("promptBrut").value.trim();
 
-  errorBox.hidden = true;
-  errorBox.textContent = "";
-  jsonTextarea.value = "";
-  qrContainer.innerHTML = "";
-  downloadBtn.disabled = true;
+  if (!titre || !version) {
+    alert("Le titre et la version sont obligatoires.");
+    return null;
+  }
 
-  const categorie = document.getElementById("createCategorie").value.trim();
-  const titre = document.getElementById("createTitre").value.trim();
-  const objectif = document.getElementById("createObjectif").value.trim();
-  const concepteur = document.getElementById("createConcepteur").value.trim();
-  const dateMaj = document.getElementById("createDateMaj").value.trim();
-  const version = document.getElementById("createVersion").value.trim();
-  const prompt = document.getElementById("createPrompt").value;
-
-  const indiceChatgpt = document.getElementById("indiceChatgpt").value;
-  const indicePerplexity = document.getElementById("indicePerplexity").value;
-  const indiceMistral = document.getElementById("indiceMistral").value;
-
-  const errors = [];
-  if (!titre) errors.push("Le titre de la fiche est obligatoire.");
-  if (!objectif) errors.push("L'objectif de la fiche est obligatoire.");
-  if (!concepteur) errors.push("Le nom du concepteur est obligatoire.");
-  if (!version) errors.push("La version est obligatoire.");
-  if (!prompt.trim()) errors.push("Le prompt de la fiche ne doit pas être vide.");
+  if (!promptBrut) {
+    alert("Le prompt brut ne peut pas être vide.");
+    return null;
+  }
 
   const variables = [];
-  const rows = document.querySelectorAll("#variablesBuilder .variable-row");
-  const ids = new Set();
-
+  const rows = document.querySelectorAll(".variable-row--create");
   rows.forEach((row, index) => {
-    const inputs = row.querySelectorAll("input, select");
+    const nameInput = row.querySelector(".variable-input-name");
+    const idInput = row.querySelector(".variable-input-id");
+    const placeholderInput = row.querySelector(".variable-input-placeholder");
+    const obligatoireSelect = row.querySelector(".variable-input-obligatoire");
 
-    const inputLabel = inputs[0];
-    const inputId = inputs[1];
-    const selectType = inputs[2];
-    const checkboxRequired = inputs[3];
+    const nom = nameInput.value.trim();
+    const id = (idInput.value || nom || `var_${index + 1}`).trim();
+    const placeholder = placeholderInput.value.trim();
+    const obligatoire = obligatoireSelect.value === "true";
 
-    const label = inputLabel.value.trim();
-    const id = inputId.value.trim();
-    const type = selectType.value;
-    const obligatoire = checkboxRequired.checked;
-
-    if (!label && !id) return;
-
-    if (!label) {
-      errors.push("Variable #" + (index + 1) + " : le label est obligatoire.");
+    if (!nom && !id) {
+      return;
     }
-    if (!id) {
-      errors.push(
-        "Variable #" + (index + 1) + " : l'identifiant est obligatoire."
-      );
-    }
-    if (id && ids.has(id)) {
-      errors.push(
-        'Variable #' +
-          (index + 1) +
-          ' : l\'identifiant "' +
-          id +
-          '" est déjà utilisé.'
-      );
-    }
-    if (id) ids.add(id);
 
     variables.push({
+      nom,
       id,
-      label,
-      type,
-      obligatoire
+      placeholder,
+      obligatoire,
     });
   });
 
-  if (errors.length > 0) {
-    errorBox.textContent = errors.join(" ");
-    errorBox.hidden = false;
-    return;
-  }
-
-  // 1) Objet "long" pour l'affichage JSON
-  const ficheObject = {
-    categorie: categorie || undefined,
+  const fiche = {
     titre,
+    categorie,
+    version,
     objectif,
+    references,
+    prompt: promptBrut,
     variables,
-    prompt,
-    indices_confiance: {
-      chatgpt: Number(indiceChatgpt),
-      perplexity: Number(indicePerplexity),
-      mistral: Number(indiceMistral)
-    },
-    concepteur,
-    date_maj: dateMaj || undefined,
-    version
   };
 
-  const cleaned = removeUndefined(ficheObject);
-  const jsonFormatted = JSON.stringify(cleaned, null, 2);
-  jsonTextarea.value = jsonFormatted;
+  return fiche;
+}
 
-  // 2) Schéma compact pour le QR
-  const compact = {
-    c: cleaned.categorie,
-    ti: cleaned.titre,
-    obj: cleaned.objectif,
-    v: Array.isArray(cleaned.variables)
-      ? cleaned.variables.map((v) => ({
-          i: v.id,
-          l: v.label,
-          t: v.type,
-          o: v.obligatoire
-        }))
-      : [],
-    pr: cleaned.prompt,
-    ic: cleaned.indices_confiance
-      ? {
-          c: cleaned.indices_confiance.chatgpt,
-          p: cleaned.indices_confiance.perplexity,
-          m: cleaned.indices_confiance.mistral
-        }
-      : undefined,
-    cp: cleaned.concepteur,
-    d: cleaned.date_maj,
-    ve: cleaned.version
+// --- Création JSON compact & payload compressé ---
+
+function createCompactFicheJson(fiche) {
+  return {
+    t: fiche.titre,
+    c: fiche.categorie,
+    v: fiche.version,
+    o: fiche.objectif,
+    r: fiche.references,
+    p: fiche.prompt,
+    vars: (fiche.variables || []).map((v) => ({
+      n: v.nom,
+      i: v.id,
+      ph: v.placeholder,
+      ob: v.obligatoire ? 1 : 0,
+    })),
   };
+}
 
-  const compactCleaned = removeUndefined(compact);
-  const compactJson = JSON.stringify(compactCleaned);
+function createCompressedPayload(objCompact) {
+  const json = JSON.stringify(objCompact);
+  const utf8Arr = new TextEncoder().encode(json);
+  const deflated = pako.deflate(utf8Arr);
+  let binary = "";
+  deflated.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  const base64 = btoa(binary);
 
-  if (typeof QRCode !== "function") {
-    alert("La librairie QRCode n'est pas disponible.");
-    return;
-  }
+  return JSON.stringify({
+    z: "pako-base64-v1",
+    d: base64,
+  });
+}
 
-  // 3) Compression + wrapper
-  let qrText;
-  try {
-    if (typeof pako !== "undefined") {
-      const base64 = compressToBase64(compactJson);
-      qrText = JSON.stringify({ z: "pako-base64-v1", d: base64 });
-    } else {
-      console.warn(
-        "pako n'est pas chargé, utilisation du JSON compact non compressé."
-      );
-      qrText = compactJson;
-    }
-  } catch (e) {
-    console.error("Erreur lors de la compression :", e);
-    qrText = compactJson; // fallback non compressé
-  }
+// --- Génération du QR code ---
 
-  // 4) Détermination dynamique de la taille du QR
-  const len = qrText.length;
-  let size = 300;          // valeur par défaut
-  if (len > 1800) size = 400;
-  if (len > 2600) size = 500;
-  if (len > 3400) size = 600;
+function generateQrCode(payload) {
+  const container = document.getElementById("generatedQr");
+  container.innerHTML = "";
 
-  try {
-    new QRCode(qrContainer, {
-      text: qrText,
+  const length = payload.length;
+  let size = 256;
+
+  if (length > 600 && length <= 1200) size = 320;
+  else if (length > 1200 && length <= 2400) size = 384;
+  else if (length > 2400 && length <= 3600) size = 448;
+  else if (length > 3600) size = 512;
+
+  QRCode.toCanvas(
+    payload,
+    {
+      errorCorrectionLevel: "M",
       width: size,
-      height: size,
-      correctLevel: QRCode.CorrectLevel.L // niveau bas pour limiter la densité
-    });
-    // Téléchargement OK tant qu'on n'a qu'un seul QR
-    downloadBtn.disabled = false;
-  } catch (e) {
-    console.error("Erreur génération QR :", e);
-    if (String(e).includes("code length overflow")) {
-      errorBox.textContent =
-        "Le contenu de la fiche est trop volumineux pour être encodé dans un QR code. " +
-        "Réduisez la taille des textes (objectif, prompt, nombre de variables…) puis réessayez.";
-    } else {
-      errorBox.textContent =
-        "Erreur lors de la génération du QR code : " + e.message;
-    }
-    errorBox.hidden = false;
-  }
-}
-
-// Téléchargement de l'image du QR code généré
-function downloadGeneratedQr() {
-  const qrContainer = document.getElementById("generatedQr");
-  const canvas = qrContainer.querySelector("canvas");
-
-  if (!canvas) {
-    alert("Aucun QR code à télécharger.");
-    return;
-  }
-
-  const link = document.createElement("a");
-  link.href = canvas.toDataURL("image/png");
-  link.download = "fiche-ia-qr.png";
-  link.click();
-}
-
-// =============================
-// Conversion compact -> long
-// =============================
-
-function expandCompactSchema(compact) {
-  const variables = Array.isArray(compact.v)
-    ? compact.v.map((v) => ({
-        id: v.i,
-        label: v.l,
-        type: v.t,
-        obligatoire: v.o
-      }))
-    : [];
-
-  const indices = compact.ic
-    ? {
-        chatgpt: compact.ic.c,
-        perplexity: compact.ic.p,
-        mistral: compact.ic.m
+      margin: 2,
+    },
+    (err, canvas) => {
+      if (err) {
+        console.error("Erreur lors de la génération du QR code :", err);
+        alert("Erreur lors de la génération du QR code.");
+        return;
       }
-    : undefined;
-
-  const full = {
-    categorie: compact.c,
-    titre: compact.ti,
-    objectif: compact.obj,
-    variables,
-    prompt: compact.pr,
-    indices_confiance: indices,
-    concepteur: compact.cp,
-    date_maj: compact.d,
-    version: compact.ve
-  };
-
-  return removeUndefined(full);
+      container.appendChild(canvas);
+      document.getElementById("downloadQrBtn").disabled = false;
+    }
+  );
 }
 
 // =============================
@@ -833,62 +667,11 @@ function expandCompactSchema(compact) {
 // =============================
 
 function escapeHtml(str) {
-  return String(str)
+  if (!str) return "";
+  return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function escapeRegex(str) {
-  // Échappe tous les caractères spéciaux de regex
-  return String(str).replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-}
-
-function removeUndefined(obj) {
-  if (Array.isArray(obj)) {
-    return obj.map(removeUndefined);
-  }
-  if (obj && typeof obj === "object") {
-    const result = {};
-    Object.keys(obj).forEach((key) => {
-      const value = obj[key];
-      if (value === undefined) return;
-      result[key] = removeUndefined(value);
-    });
-    return result;
-  }
-  return obj;
-}
-
-// Compression : JSON string -> base64 deflate
-function compressToBase64(str) {
-  if (typeof pako === "undefined") {
-    throw new Error("pako n'est pas disponible.");
-  }
-  const encoder = new TextEncoder();
-  const utf8 = encoder.encode(str);
-  const compressed = pako.deflate(utf8);
-  let binary = "";
-  for (let i = 0; i < compressed.length; i++) {
-    binary += String.fromCharCode(compressed[i]);
-  }
-  return btoa(binary);
-}
-
-// Décompression : base64 deflate -> JSON string
-function decompressFromBase64(b64) {
-  if (typeof pako === "undefined") {
-    throw new Error("pako n'est pas disponible.");
-  }
-  const binary = atob(b64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  const decompressed = pako.inflate(bytes);
-  const decoder = new TextDecoder();
-  return decoder.decode(decompressed);
 }
