@@ -1,10 +1,8 @@
 // ======================================================
 // Mémento opérationnel IA – RCH
-// app.js — Version 0.4.6 (QrScanner, 1 seul bouton caméra)
+// app.js — Version 0.4.3 (adaptation taille QR dynamique codage jusqu'à au moins 8800 caractères et geolocalisation)
 // ------------------------------------------------------
-// - QrScanner (caméra + fichiers) avec priorité caméra arrière
-// - Un seul bouton "Activer la caméra" (toggle ON/OFF)
-// - Détection automatique du premier QR dans le flux
+// - Instance unique Html5Qrcode (caméra + fichiers)
 // - Lecture de QR JSON → génération des champs variables
 // - Concatenation du prompt + infos complémentaires
 // - Création du JSON de fiche + QR code
@@ -15,14 +13,10 @@
 // - Ajustement de la taille du QR en fonction de la longueur du texte
 // ======================================================
 
-// État global
-let scanner = null;                // instance QrScanner pour la caméra
-let isCameraRunning = false;       // état de la caméra
-let currentFiche = null;           // fiche courante décodée depuis le QR
-let currentVariablesValues = {};   // valeurs saisies dans les variables
-let html5QrCode = null;             // POUR la lecture de fichiers (Html5Qrcode)
-let qrScanner = null;               // POUR la caméra (QrScanner)
-
+let html5QrCode = null;
+let isCameraRunning = false;
+let currentFiche = null;
+let currentVariablesValues = {};
 
 // =============================
 // Initialisation
@@ -34,13 +28,32 @@ document.addEventListener("DOMContentLoaded", () => {
   initCreateView();
 });
 
-// Helper : vérifie la présence de la lib QrScanner
-function ensureQrScannerAvailable() {
-  if (typeof QrScanner === "undefined") {
+// Helper : vérifie la présence de la lib Html5Qrcode
+function ensureHtml5QrCodeInstance() {
+  if (typeof Html5Qrcode === "undefined") {
     throw new Error(
-      "QrScanner n'est pas chargé (vérifier le script dans index.html)."
+      "Html5Qrcode n'est pas chargé (vérifier le chargement du script)."
     );
   }
+  if (!html5QrCode) {
+    // Configuration légèrement plus robuste
+    try {
+      html5QrCode = new Html5Qrcode("camera", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE
+        ],
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true
+        },
+        verbose: false
+      });
+    } catch (e) {
+      // fallback minimal si la config avancée pose problème
+      console.warn("Configuration avancée Html5Qrcode impossible, fallback simple :", e);
+      html5QrCode = new Html5Qrcode("camera");
+    }
+  }
+  return html5QrCode;
 }
 
 // =============================
@@ -75,6 +88,7 @@ function initTabs() {
 
 function initScanView() {
   const cameraBtn = document.getElementById("cameraBtn");
+  const scanBtn = document.getElementById("scanBtn");
   const resetBtn = document.getElementById("resetBtn");
   const qrFileInput = document.getElementById("qrFile");
   const generatePromptBtn = document.getElementById("generatePromptBtn");
@@ -84,13 +98,10 @@ function initScanView() {
   const btnPerplexity = document.getElementById("btnPerplexity");
   const btnMistral = document.getElementById("btnMistral");
 
-  // Un seul bouton : démarre la caméra (si pas déjà lancée)
-  cameraBtn.addEventListener("click", () => {
-    if (!isCameraRunning) {
-      startCameraScan();
-    }
+  cameraBtn.addEventListener("click", startCameraScan);
+  scanBtn.addEventListener("click", () => {
+    if (!isCameraRunning) startCameraScan();
   });
-
   resetBtn.addEventListener("click", resetScanView);
 
   qrFileInput.addEventListener("change", (event) => {
@@ -111,68 +122,48 @@ function initScanView() {
   setIaButtonsState(null);
 }
 
-
-// --- Caméra (QrScanner) ---
+// --- Caméra ---
 
 function startCameraScan() {
   const cameraError = document.getElementById("cameraError");
   const videoBox = document.getElementById("videoBox");
   cameraError.hidden = true;
-  cameraError.textContent = "";
 
-  // Si la caméra tourne déjà, on ne relance pas
   if (isCameraRunning) return;
 
   videoBox.hidden = false;
 
-  // Arrête un éventuel scanner précédent
-  if (qrScanner) {
-    try {
-      qrScanner.stop();
-      qrScanner.destroy();
-    } catch (e) {
-      console.warn("Erreur à l'arrêt de l'ancien scanner :", e);
-    }
-    qrScanner = null;
-  }
-
-  const videoEl = document.getElementById("camera");
-
+  let qr;
   try {
-    // Callback à chaque décodage : on arrête la caméra après la 1re lecture
-    qrScanner = new QrScanner(
-      videoEl,
-      (result) => {
-        const decodedText = result && result.data ? result.data : result;
-        stopCameraScan();
-        handleQrDecoded(decodedText);
-      },
-      {
-        highlightScanRegion: true,
-        highlightCodeOutline: true
-      }
-    );
+    qr = ensureHtml5QrCodeInstance();
   } catch (err) {
-    cameraError.textContent =
-      "Erreur lors de l'initialisation de la caméra : " + (err?.message || err);
+    cameraError.textContent = "Erreur Html5Qrcode : " + err.message;
     cameraError.hidden = false;
     videoBox.hidden = true;
     return;
   }
 
-  // Sélection prioritaire de la caméra arrière si disponible
-  QrScanner.listCameras(true)
-    .then((cameras) => {
-      if (!cameras || cameras.length === 0) {
+  Html5Qrcode.getCameras()
+    .then((devices) => {
+      if (!devices || devices.length === 0) {
         throw new Error("Aucune caméra disponible.");
       }
+      const backCamera = devices.find((d) =>
+        d.label.toLowerCase().includes("back")
+      );
+      const cameraId = backCamera ? backCamera.id : devices[0].id;
 
-      const backCam =
-        cameras.find((c) =>
-          /back|rear|environment/i.test(c.label || "")
-        ) || cameras[0];
-
-      return qrScanner.start(backCam.id);
+      return qr.start(
+        cameraId,
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+          handleQrDecoded(decodedText);
+          stopCameraScan();
+        },
+        (errorMessage) => {
+          console.debug("Erreur scan frame:", errorMessage);
+        }
+      );
     })
     .then(() => {
       isCameraRunning = true;
@@ -182,77 +173,57 @@ function startCameraScan() {
         "Impossible d'activer la caméra : " + (err?.message || err);
       cameraError.hidden = false;
       videoBox.hidden = true;
-
-      try {
-        if (qrScanner) {
-          qrScanner.stop();
-          qrScanner.destroy();
-        }
-      } catch (e2) {
-        console.warn("Erreur supplémentaire à l'arrêt de la caméra :", e2);
-      }
-      qrScanner = null;
-      isCameraRunning = false;
     });
 }
-
 
 function stopCameraScan() {
   const videoBox = document.getElementById("videoBox");
 
-  if (qrScanner) {
-    qrScanner
+  if (html5QrCode && isCameraRunning) {
+    html5QrCode
       .stop()
       .then(() => {
-        qrScanner.destroy();
-        qrScanner = null;
         isCameraRunning = false;
       })
       .catch((err) => {
-        console.warn("Erreur à l'arrêt du scanner caméra :", err);
-        qrScanner.destroy();
-        qrScanner = null;
-        isCameraRunning = false;
+        console.warn("Erreur à l'arrêt de la caméra:", err);
       });
-  } else {
-    isCameraRunning = false;
   }
 
-  if (videoBox) {
-    videoBox.hidden = true;
-  }
+  videoBox.hidden = true;
 }
 
-
-// --- Lecture depuis fichier image (QrScanner.scanImage) ---
+// --- Lecture depuis fichier image ---
 
 function scanQrFromFile(file) {
   const cameraError = document.getElementById("cameraError");
   cameraError.hidden = true;
-  cameraError.textContent = "";
 
+  let qr;
   try {
-    ensureQrScannerAvailable();
+    qr = ensureHtml5QrCodeInstance();
   } catch (err) {
-    cameraError.textContent = "Erreur QrScanner : " + err.message;
+    cameraError.textContent = "Erreur Html5Qrcode : " + err.message;
     cameraError.hidden = false;
     return;
   }
 
-  if (isCameraRunning) {
-    stopCameraScan();
-  }
+  if (isCameraRunning) stopCameraScan();
 
-  QrScanner.scanImage(file, { returnDetailedScanResult: true })
-    .then((result) => {
-      const decodedText = result?.data || result;
+  qr
+    // true → affiche l'image et permet parfois une meilleure analyse
+    .scanFile(file, true)
+    .then((decodedText) => {
       handleQrDecoded(decodedText);
+      qr.clear();
+      html5QrCode = null;
     })
     .catch((err) => {
-      console.error("Erreur scanImage :", err);
+      console.error("Erreur scanFile :", err);
       cameraError.textContent =
         "Impossible de lire le QR depuis le fichier. " +
         "L'image est probablement trop petite, floue ou le code trop dense. " +
+        "Essayez avec le PNG généré en 400×400 ou plus. " +
         "Détail technique : " +
         (err?.message || err);
       cameraError.hidden = false;
@@ -367,9 +338,6 @@ function renderVariablesForm() {
     } else if (type === "file") {
       inputEl = document.createElement("input");
       inputEl.type = "file";
-    } else if (type === "geoloc") {
-      inputEl = document.createElement("input");
-      inputEl.type = "text";
     } else {
       inputEl = document.createElement("input");
       inputEl.type = "text";
@@ -791,6 +759,7 @@ function generateJsonAndQr() {
       height: size,
       correctLevel: QRCode.CorrectLevel.L // niveau bas pour limiter la densité
     });
+    // Téléchargement OK tant qu'on n'a qu'un seul QR
     downloadBtn.disabled = false;
   } catch (e) {
     console.error("Erreur génération QR :", e);
@@ -873,6 +842,7 @@ function escapeHtml(str) {
 }
 
 function escapeRegex(str) {
+  // Échappe tous les caractères spéciaux de regex
   return String(str).replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
 }
 
