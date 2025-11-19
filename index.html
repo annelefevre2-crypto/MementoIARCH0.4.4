@@ -11,7 +11,10 @@
   <!-- Styles de l'application -->
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Lib pour scan QR (caméra + fichier) : QrScanner -->
+  <!-- Lib pour scan QR depuis un fichier (Html5Qrcode) -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <!-- Lib pour scan QR avec la caméra (QrScanner) -->
   <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
   <script>
     // Chemin vers le worker (obligatoire avec la version UMD)
@@ -78,6 +81,9 @@
               <div id="videoBox" class="video-box" hidden>
                 <video id="camera" class="camera-view" playsinline muted></video>
               </div>
+
+              <!-- lecteur "invisible" utilisé par Html5Qrcode pour les fichiers -->
+              <div id="qrFileReader" style="display:none;"></div>
 
               <div class="file-import">
                 <label for="qrFile">Ou importer une image de QR :</label>
@@ -251,11 +257,10 @@
     </main>
 
     <footer class="app-footer">
-      © ENSOSP — Cne Eddy Fischer – Cdt Anne Tirelle — v0.4.6
+      © ENSOSP — Cne Eddy Fischer – Cdt Anne Tirelle — v0.4.5
     </footer>
   </div>
 
-  <!-- Logique applicative -->
   <script src="app.js"></script>
 </body>
 </html>
