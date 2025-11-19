@@ -1,6 +1,6 @@
 // ======================================================
 // Mémento opérationnel IA – RCH
-// app.js — Version 0.4.3 (adaptation taille QR dynamique codage jusqu'à au moins 8800 caractères et geolocalisation)
+// app.js — Version 0.4.4 (adaptation taille QR dynamique codage jusqu'à au moins 8800 caractères et geolocalisation)essai correction lecture qr code caméra
 // ------------------------------------------------------
 // - Instance unique Html5Qrcode (caméra + fichiers)
 // - Lecture de QR JSON → génération des champs variables
