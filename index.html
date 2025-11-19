@@ -11,13 +11,12 @@
   <!-- Styles de l'application -->
   <link rel="stylesheet" href="style.css" />
 
-    <!-- Lib pour scan QR (caméra + fichier) : QrScanner -->
+  <!-- Lib pour scan QR (caméra + fichier) : QrScanner -->
   <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
   <script>
     // Chemin vers le worker (obligatoire avec la version UMD)
     QrScanner.WORKER_PATH = "https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js";
   </script>
-
 
   <!-- Lib pour génération de QR codes -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -80,9 +79,8 @@
               <div id="cameraError" class="alert alert-error" hidden></div>
 
               <div id="videoBox" class="video-box" hidden>
-  <video id="camera" class="camera-view" playsinline muted></video>
-</div>
-
+                <video id="camera" class="camera-view" playsinline muted></video>
+              </div>
 
               <div class="file-import">
                 <label for="qrFile">Ou importer une image de QR :</label>
@@ -260,6 +258,7 @@
     </footer>
   </div>
 
+  <!-- Logique applicative -->
   <script src="app.js"></script>
 </body>
 </html>
