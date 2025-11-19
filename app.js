@@ -114,69 +114,88 @@ function initScanView() {
 
 // --- Caméra (QrScanner) ---
 
-async function startCameraScan() {
+function startCameraScan() {
   const cameraError = document.getElementById("cameraError");
   const videoBox = document.getElementById("videoBox");
-  const videoElem = document.getElementById("camera"); // <video id="camera">
-
   cameraError.hidden = true;
   cameraError.textContent = "";
 
+  // Si la caméra tourne déjà, on ne relance pas
   if (isCameraRunning) return;
 
   videoBox.hidden = false;
 
-  try {
-    ensureQrScannerAvailable();
-
-    // Si un scanner existe déjà, on le détruit proprement
-    if (scanner) {
-      await scanner.stop().catch(() => {});
-      scanner.destroy();
-      scanner = null;
-    }
-
-    // Callback déclenché à la première lecture
-    const onDecode = (result) => {
-      const decodedText = result?.data || result;
-      handleQrDecoded(decodedText);
-      stopCameraScan(); // arrêt automatique dès la première fiche
-    };
-
-    scanner = new QrScanner(videoElem, onDecode, {
-      highlightScanRegion: true,
-      highlightCodeOutline: true
-    });
-
-    // Sélection de la caméra arrière si possible
-    let cameras = [];
+  // Arrête un éventuel scanner précédent
+  if (qrScanner) {
     try {
-      cameras = await QrScanner.listCameras(true);
+      qrScanner.stop();
+      qrScanner.destroy();
     } catch (e) {
-      console.warn("Impossible de lister les caméras :", e);
+      console.warn("Erreur à l'arrêt de l'ancien scanner :", e);
     }
+    qrScanner = null;
+  }
 
-    if (Array.isArray(cameras) && cameras.length > 0) {
-      const backCam =
-        cameras.find((c) =>
-          /back|rear|environment|arrière/i.test(c.label || "")
-        ) || cameras[0];
-      await scanner.start(backCam.id);
-    } else {
-      // Fallback : laisser QrScanner choisir
-      await scanner.start();
-    }
+  const videoEl = document.getElementById("camera");
 
-    isCameraRunning = true;
+  try {
+    // Callback à chaque décodage : on arrête la caméra après la 1re lecture
+    qrScanner = new QrScanner(
+      videoEl,
+      (result) => {
+        const decodedText = result && result.data ? result.data : result;
+        stopCameraScan();
+        handleQrDecoded(decodedText);
+      },
+      {
+        highlightScanRegion: true,
+        highlightCodeOutline: true
+      }
+    );
   } catch (err) {
-    console.error("Erreur startCameraScan :", err);
     cameraError.textContent =
-      "Impossible d'activer la caméra : " + (err?.message || err);
+      "Erreur lors de l'initialisation de la caméra : " + (err?.message || err);
     cameraError.hidden = false;
     videoBox.hidden = true;
-    isCameraRunning = false;
+    return;
   }
+
+  // Sélection prioritaire de la caméra arrière si disponible
+  QrScanner.listCameras(true)
+    .then((cameras) => {
+      if (!cameras || cameras.length === 0) {
+        throw new Error("Aucune caméra disponible.");
+      }
+
+      const backCam =
+        cameras.find((c) =>
+          /back|rear|environment/i.test(c.label || "")
+        ) || cameras[0];
+
+      return qrScanner.start(backCam.id);
+    })
+    .then(() => {
+      isCameraRunning = true;
+    })
+    .catch((err) => {
+      cameraError.textContent =
+        "Impossible d'activer la caméra : " + (err?.message || err);
+      cameraError.hidden = false;
+      videoBox.hidden = true;
+
+      try {
+        if (qrScanner) {
+          qrScanner.stop();
+          qrScanner.destroy();
+        }
+      } catch (e2) {
+        console.warn("Erreur supplémentaire à l'arrêt de la caméra :", e2);
+      }
+      qrScanner = null;
+      isCameraRunning = false;
+    });
 }
+
 
 function stopCameraScan() {
   const videoBox = document.getElementById("videoBox");
