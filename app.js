@@ -1,6 +1,6 @@
 // ======================================================
 // Mémento opérationnel IA – RCH
-// app.js — Version 0.4.4
+// app.js — Version 0.4.5
 // ------------------------------------------------------
 // - Scanner QrScanner (caméra + fichiers)
 // - Caméra arrière prioritaire (smartphones/tablettes)
