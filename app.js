@@ -20,6 +20,9 @@ let scanner = null;                // instance QrScanner pour la caméra
 let isCameraRunning = false;       // état de la caméra
 let currentFiche = null;           // fiche courante décodée depuis le QR
 let currentVariablesValues = {};   // valeurs saisies dans les variables
+let html5QrCode = null;             // POUR la lecture de fichiers (Html5Qrcode)
+let qrScanner = null;               // POUR la caméra (QrScanner)
+
 
 // =============================
 // Initialisation
@@ -81,18 +84,15 @@ function initScanView() {
   const btnPerplexity = document.getElementById("btnPerplexity");
   const btnMistral = document.getElementById("btnMistral");
 
-  // Bouton "Activer la caméra" : ON / OFF
+  // Un seul bouton : démarre la caméra (si pas déjà lancée)
   cameraBtn.addEventListener("click", () => {
-    if (isCameraRunning) {
-      stopCameraScan();
-    } else {
+    if (!isCameraRunning) {
       startCameraScan();
     }
   });
 
   resetBtn.addEventListener("click", resetScanView);
 
-  // Lecture depuis un fichier image
   qrFileInput.addEventListener("change", (event) => {
     const file = event.target.files[0];
     if (file) scanQrFromFile(file);
@@ -110,6 +110,7 @@ function initScanView() {
 
   setIaButtonsState(null);
 }
+
 
 // --- Caméra (QrScanner) ---
 
