@@ -11,8 +11,13 @@
   <!-- Styles de l'application -->
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Lib pour scan QR (caméra + fichier) -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- Lib pour scan QR (caméra + fichier) : QrScanner -->
+  <script src="https://unpkg.com/qr-scanner@1.4.2/qr-scanner.umd.min.js"></script>
+  <script>
+    // Chemin vers le worker (obligatoire avec la version UMD)
+    QrScanner.WORKER_PATH = "https://unpkg.com/qr-scanner@1.4.2/qr-scanner-worker.min.js";
+  </script>
+
 
   <!-- Lib pour génération de QR codes -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
