@@ -1,8 +1,10 @@
 // ======================================================
 // Mémento opérationnel IA – RCH
-// app.js — Version 0.4.4 (QrScanner)
+// app.js — Version 0.4.6 (QrScanner, 1 seul bouton caméra)
 // ------------------------------------------------------
 // - QrScanner (caméra + fichiers) avec priorité caméra arrière
+// - Un seul bouton "Activer la caméra" (toggle ON/OFF)
+// - Détection automatique du premier QR dans le flux
 // - Lecture de QR JSON → génération des champs variables
 // - Concatenation du prompt + infos complémentaires
 // - Création du JSON de fiche + QR code
@@ -70,7 +72,6 @@ function initTabs() {
 
 function initScanView() {
   const cameraBtn = document.getElementById("cameraBtn");
-  const scanBtn = document.getElementById("scanBtn");
   const resetBtn = document.getElementById("resetBtn");
   const qrFileInput = document.getElementById("qrFile");
   const generatePromptBtn = document.getElementById("generatePromptBtn");
@@ -87,12 +88,6 @@ function initScanView() {
     } else {
       startCameraScan();
     }
-  });
-
-  // Bouton "Scanner QR Code" : reset complet + relance du scan
-  scanBtn.addEventListener("click", () => {
-    resetScanView();
-    startCameraScan();
   });
 
   resetBtn.addEventListener("click", resetScanView);
@@ -144,7 +139,7 @@ async function startCameraScan() {
     const onDecode = (result) => {
       const decodedText = result?.data || result;
       handleQrDecoded(decodedText);
-      stopCameraScan();
+      stopCameraScan(); // arrêt automatique dès la première fiche
     };
 
     scanner = new QrScanner(videoElem, onDecode, {
