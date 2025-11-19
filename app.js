@@ -1,6 +1,6 @@
 // ======================================================
 // Mémento opérationnel IA – RCH
-// app.js — Version 0.4.4 (adaptation taille QR dynamique codage jusqu'à au moins 8800 caractères et geolocalisation)
+// app.js — Version 0.4.3 (adaptation taille QR dynamique codage jusqu'à au moins 8800 caractères et geolocalisation)
 // ------------------------------------------------------
 // - Instance unique Html5Qrcode (caméra + fichiers)
 // - Lecture de QR JSON → génération des champs variables
@@ -98,21 +98,10 @@ function initScanView() {
   const btnPerplexity = document.getElementById("btnPerplexity");
   const btnMistral = document.getElementById("btnMistral");
 
-   // Bouton "Activer la caméra" : ON / OFF
-  cameraBtn.addEventListener("click", () => {
-    if (isCameraRunning) {
-      stopCameraScan();
-    } else {
-      startCameraScan();
-    }
-  });
-
-  // Bouton "Scanner QR Code" : réinitialise la vue et relance un scan propre
+  cameraBtn.addEventListener("click", startCameraScan);
   scanBtn.addEventListener("click", () => {
-    resetScanView();
-    startCameraScan();
+    if (!isCameraRunning) startCameraScan();
   });
-
   resetBtn.addEventListener("click", resetScanView);
 
   qrFileInput.addEventListener("change", (event) => {
@@ -139,7 +128,6 @@ function startCameraScan() {
   const cameraError = document.getElementById("cameraError");
   const videoBox = document.getElementById("videoBox");
   cameraError.hidden = true;
-  cameraError.textContent = "";
 
   if (isCameraRunning) return;
 
@@ -155,59 +143,36 @@ function startCameraScan() {
     return;
   }
 
-  const config = {
-    fps: 10,
-    qrbox: calculateQrbox(),
-    aspectRatio: 1.0
-  };
+  Html5Qrcode.getCameras()
+    .then((devices) => {
+      if (!devices || devices.length === 0) {
+        throw new Error("Aucune caméra disponible.");
+      }
+      const backCamera = devices.find((d) =>
+        d.label.toLowerCase().includes("back")
+      );
+      const cameraId = backCamera ? backCamera.id : devices[0].id;
 
-  const onSuccess = (decodedText) => {
-    handleQrDecoded(decodedText);
-    stopCameraScan();
-  };
-
-  const onError = (errorMessage) => {
-    // Erreurs de frame normales (mauvaise mise au point, etc.)
-    console.debug("Erreur scan frame:", errorMessage);
-  };
-
-  // 1️⃣ Tentative prioritaire : caméra arrière via facingMode: "environment"
-  qr
-    .start({ facingMode: "environment" }, config, onSuccess, onError)
+      return qr.start(
+        cameraId,
+        { fps: 10, qrbox: 250 },
+        (decodedText) => {
+          handleQrDecoded(decodedText);
+          stopCameraScan();
+        },
+        (errorMessage) => {
+          console.debug("Erreur scan frame:", errorMessage);
+        }
+      );
+    })
     .then(() => {
       isCameraRunning = true;
     })
     .catch((err) => {
-      console.warn(
-        "Échec start avec facingMode: 'environment', tentative avec getCameras()…",
-        err
-      );
-
-      // 2️⃣ Fallback : on liste les caméras et on choisit la plus pertinente
-      Html5Qrcode.getCameras()
-        .then((devices) => {
-          if (!devices || devices.length === 0) {
-            throw new Error("Aucune caméra disponible.");
-          }
-
-          const normalize = (s) => (s || "").toLowerCase();
-          const backDevice =
-            devices.find((d) =>
-              /back|rear|arrière|environment/.test(normalize(d.label))
-            ) || devices[0];
-
-          return qr.start(backDevice.id, config, onSuccess, onError);
-        })
-        .then(() => {
-          isCameraRunning = true;
-        })
-        .catch((err2) => {
-          cameraError.textContent =
-            "Impossible d'activer la caméra : " +
-            (err2?.message || err2 || err);
-          cameraError.hidden = false;
-          videoBox.hidden = true;
-        });
+      cameraError.textContent =
+        "Impossible d'activer la caméra : " + (err?.message || err);
+      cameraError.hidden = false;
+      videoBox.hidden = true;
     });
 }
 
@@ -219,18 +184,14 @@ function stopCameraScan() {
       .stop()
       .then(() => {
         isCameraRunning = false;
-        videoBox.hidden = true;
       })
       .catch((err) => {
         console.warn("Erreur à l'arrêt de la caméra:", err);
-        isCameraRunning = false;
-        videoBox.hidden = true;
       });
-  } else {
-    videoBox.hidden = true;
   }
-}
 
+  videoBox.hidden = true;
+}
 
 // --- Lecture depuis fichier image ---
 
@@ -870,20 +831,6 @@ function expandCompactSchema(compact) {
 // =============================
 // Utilitaires
 // =============================
-
-function calculateQrbox() {
-  const viewportWidth =
-    window.innerWidth || document.documentElement.clientWidth || 800;
-
-  // Sur mobile on réduit un peu, sur desktop on agrandit
-  if (viewportWidth < 480) {
-    return { width: 220, height: 220 };
-  } else if (viewportWidth < 900) {
-    return { width: 260, height: 260 };
-  }
-  return { width: 300, height: 300 };
-}
-
 
 function escapeHtml(str) {
   return String(str)
