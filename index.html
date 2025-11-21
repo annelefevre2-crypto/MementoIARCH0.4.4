@@ -12,7 +12,11 @@
   <link rel="stylesheet" href="style.css" />
 
   <!-- Lib pour scan QR (caméra + fichier) -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+ <script type="module">
+  import { BrowserQRCodeReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.1/+esm";
+  window.ZXingReader = BrowserQRCodeReader;
+</script>
+
 
   <!-- Lib pour génération de QR codes -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
