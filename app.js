@@ -153,14 +153,28 @@ function startCameraScan() {
       );
       const cameraId = backCamera ? backCamera.id : devices[0].id;
 
+      // ==== CONFIG OPTIMISÉE ====
+      const scanConfig = {
+        fps: 8, // Modère la charge et la stabilité
+        qrbox: 350, // Plus grande fenêtre que l’original (250)
+        // Optionnel : si ton QR est rectangle : {width: 360, height: 360},
+        disableFlip: true // Pour éviter les mirroirs inutiles
+      };
+
       return qr.start(
         cameraId,
-        { fps: 10, qrbox: 250 },
+        scanConfig,
         (decodedText) => {
           handleQrDecoded(decodedText);
           stopCameraScan();
         },
         (errorMessage) => {
+          // Affiche les erreurs de détection "en direct"
+          cameraError.hidden = false;
+          cameraError.textContent =
+            "Aucune détection. Approchez le QR code, éclairez bien, testez une plus grande taille." +
+            " (Détail technique : " + errorMessage + ")";
+          // Uniquement à titre de debug, retire si gênant
           console.debug("Erreur scan frame:", errorMessage);
         }
       );
