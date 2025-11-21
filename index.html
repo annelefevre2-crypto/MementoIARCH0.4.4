@@ -14,32 +14,39 @@
   <!-- Lib pour scan QR (caméra + fichier) -->
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
-  <!-- Lib pour QR code en création -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <!-- Lib pour génération de QR codes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 
-  <!-- Lib pour compression (pako) -->
-  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+  <!-- Lib de compression (deflate) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
 </head>
 <body>
+  <!-- Enveloppe générale -->
   <div class="app-root">
 
+    <!-- Bandeau supérieur -->
     <header class="app-header">
       <div class="header-left">
-        <img src="ensosp-logo.png" alt="Logo ENSOSP" class="logo-ensosp" />
-        <div>
+        <img src="logo-ensosp.png" alt="ENSOSP" class="logo-ensosp">
+        <div class="header-title">
           <div class="header-title-main">Mémento opérationnel IA – RCH</div>
-          <div class="header-title-sub">Outil expérimental — Génération de prompts assistés</div>
         </div>
       </div>
       <div class="header-right">
-        <span class="chip chip--info">Version 0.4.3</span>
+        <button class="lang-switch">
+          <span>FR</span>
+          <span class="lang-switch-arrow">▼</span>
+        </button>
       </div>
     </header>
 
+    <!-- Contenu principal -->
     <main class="app-main">
+
+      <!-- Onglets -->
       <div class="tabs">
         <button class="tab-button tab-button--active" data-tab="scan">
-          Lecture de fiche
+          Lire une fiche (scan QR)
         </button>
         <button class="tab-button" data-tab="create">
           Création de fiche
@@ -57,6 +64,9 @@
                 <button id="cameraBtn" class="btn btn-primary">
                   Activer la caméra
                 </button>
+                <button id="scanBtn" class="btn btn-primary">
+                  Scanner QR Code
+                </button>
                 <button id="resetBtn" class="btn btn-secondary">
                   Réinitialiser
                 </button>
@@ -68,23 +78,29 @@
                 <div id="camera" class="camera-view"></div>
               </div>
 
-              <div class="file-input-row">
-                <label for="qrFile" class="file-label">
-                  Importer un QR code (image)
-                </label>
+              <div class="file-import">
+                <label for="qrFile">Ou importer une image de QR :</label>
                 <input type="file" id="qrFile" accept="image/*" />
               </div>
             </div>
 
             <div class="card-section">
-              <label for="infosComplementaires" class="section-label">
-                Informations complémentaires (facultatif)
-              </label>
-              <textarea
-                id="infosComplementaires"
-                class="textarea textarea--large"
-                placeholder="Ex : contexte opérationnel, contraintes particulières, etc."
-              ></textarea>
+              <h2 class="section-title">Prompt</h2>
+
+              <div class="ia-buttons">
+                <button id="btnChatgpt" class="btn-ia" disabled>ChatGPT</button>
+                <button id="btnPerplexity" class="btn-ia" disabled>Perplexity</button>
+                <button id="btnMistral" class="btn-ia" disabled>Mistral</button>
+              </div>
+
+              <button id="generatePromptBtn" class="btn btn-primary btn-full-width">
+                Générer le prompt
+              </button>
+
+              <textarea id="compiledPrompt"
+                        class="prompt-output"
+                        placeholder="Prompt IA généré…"
+                        readonly></textarea>
             </div>
           </div>
 
@@ -101,142 +117,133 @@
             </div>
 
             <div class="card-section">
-              <label for="compiledPrompt" class="section-label">
-                Prompt généré
-              </label>
-              <textarea
-                id="compiledPrompt"
-                class="textarea textarea--prompt"
-                readonly
-              ></textarea>
+              <h2 class="section-title">Informations complémentaires</h2>
+              <textarea id="infosComplementaires"
+                        class="infos-textarea"
+                        placeholder="Notes libres, observations, mots-clés…"></textarea>
+            </div>
 
-              <div class="button-row button-row--end">
-                <button id="generatePromptBtn" class="btn btn-primary">
-                  Actualiser le prompt
-                </button>
-              </div>
-
-              <div class="ia-buttons-row">
-                <button id="btnChatgpt" class="btn btn-ia" disabled>
-                  Ouvrir dans ChatGPT
-                </button>
-                <button id="btnPerplexity" class="btn btn-ia" disabled>
-                  Ouvrir dans Perplexity
-                </button>
-                <button id="btnMistral" class="btn btn-ia" disabled>
-                  Ouvrir dans Mistral
-                </button>
-              </div>
+            <div id="scanHint" class="scan-hint">
+              Scannez un QR code pour charger une fiche opérationnelle.
             </div>
           </div>
+
         </div>
       </section>
 
       <!-- === Onglet : Création de fiche === -->
       <section class="tab-panel" id="tab-create">
-        <div class="cards-layout cards-layout--stacked">
+        <div class="card">
+          <div class="card-section">
+            <h2 class="section-title">Métadonnées de la fiche</h2>
 
-          <div class="card">
-            <div class="card-section card-section--horizontal">
-              <div class="form-column">
-                <h2 class="section-title">Métadonnées de la fiche</h2>
-
-                <div class="form-group">
-                  <label for="ficheTitre" class="section-label">Titre de la fiche</label>
-                  <input id="ficheTitre" class="input" type="text" placeholder="Ex : Analyse produit" />
-                </div>
-
-                <div class="form-group">
-                  <label for="ficheCategorie" class="section-label">Catégorie</label>
-                  <input id="ficheCategorie" class="input" type="text" placeholder="Ex : Analyse, Zone, Conduite à tenir" />
-                </div>
-
-                <div class="form-group">
-                  <label for="ficheVersion" class="section-label">Version</label>
-                  <input id="ficheVersion" class="input" type="text" placeholder="Ex : V0, V1.0" />
-                </div>
-
-                <div class="form-group">
-                  <label for="ficheObjectif" class="section-label">Objectif</label>
-                  <textarea id="ficheObjectif" class="textarea" placeholder="Décrire l'objectif opérationnel de la fiche"></textarea>
-                </div>
-
-                <div class="form-group">
-                  <label for="ficheReferences" class="section-label">
-                    Références bibliographiques / sources
-                  </label>
-                  <textarea
-                    id="ficheReferences"
-                    class="textarea"
-                    placeholder="Sources officielles, documents de référence..."
-                  ></textarea>
-                </div>
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="createCategorie">Catégorie</label>
+                <input id="createCategorie" type="text" />
               </div>
-
-              <div class="form-column">
-                <h2 class="section-title">Champs d'entrée</h2>
-
-                <div id="variablesCreateContainer" class="variables-create-container"></div>
-
-                <div class="button-row">
-                  <button id="addVariableBtn" class="btn btn-secondary">
-                    Ajouter un champ
-                  </button>
-                </div>
+              <div class="form-field">
+                <label for="createTitre">Titre de la fiche</label>
+                <input id="createTitre" type="text" />
+              </div>
+              <div class="form-field">
+                <label for="createObjectif">Objectif de la fiche</label>
+                <input id="createObjectif" type="text" />
+              </div>
+              <div class="form-field">
+                <label for="createConcepteur">Nom du concepteur</label>
+                <input id="createConcepteur" type="text" />
+              </div>
+              <div class="form-field">
+                <label for="createDateMaj">Date de mise à jour</label>
+                <input id="createDateMaj" type="date" />
+              </div>
+              <div class="form-field">
+                <label for="createVersion">Version</label>
+                <input id="createVersion" type="text" placeholder="ex : V0.4.0" />
               </div>
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-section card-section--horizontal">
-              <div class="form-column">
-                <h2 class="section-title">Prompt brut</h2>
-                <textarea
-                  id="promptBrut"
-                  class="textarea textarea--prompt"
-                  placeholder="Écrire ici le prompt en intégrant les champs définis ci-dessus..."
-                ></textarea>
+          <div class="card-section">
+            <h2 class="section-title">Indices de confiance IA</h2>
+            <div class="form-grid form-grid--3">
+              <div class="form-field">
+                <label for="indiceChatgpt">ChatGPT</label>
+                <select id="indiceChatgpt">
+                  <option value="3">3 - Recommandée</option>
+                  <option value="2">2 - Utilisable avec prudence</option>
+                  <option value="1">1 - Déconseillée</option>
+                </select>
               </div>
-
-              <div class="form-column">
-                <h2 class="section-title">JSON généré</h2>
-                <textarea
-                  id="jsonOutput"
-                  class="textarea textarea--code"
-                  readonly
-                ></textarea>
-
-                <div class="button-row">
-                  <button id="generateJsonBtn" class="btn btn-primary">
-                    Générer le JSON
-                  </button>
-                  <button id="copyJsonBtn" class="btn btn-secondary" disabled>
-                    Copier le JSON
-                  </button>
-                </div>
+              <div class="form-field">
+                <label for="indicePerplexity">Perplexity</label>
+                <select id="indicePerplexity">
+                  <option value="3">3 - Recommandée</option>
+                  <option value="2">2 - Utilisable avec prudence</option>
+                  <option value="1">1 - Déconseillée</option>
+                </select>
               </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-section card-section--horizontal">
-              <div class="form-column">
-                <h2 class="section-title">QR code de la fiche</h2>
-                <p class="helper-text">
-                  Le QR code encode un JSON compact, éventuellement compressé.
-                  Il est lisible par l’onglet « Lecture de fiche » du présent outil.
-                </p>
-                <div id="qrPreview" class="qr-preview">
-                  <h3 class="section-subtitle">QR code</h3>
-                  <div id="generatedQr"></div>
-                  <button id="downloadQrBtn" class="btn btn-secondary" disabled>
-                    Télécharger le QR code
-                  </button>
-                </div>
+              <div class="form-field">
+                <label for="indiceMistral">Mistral</label>
+                <select id="indiceMistral">
+                  <option value="3">3 - Recommandée</option>
+                  <option value="2">2 - Utilisable avec prudence</option>
+                  <option value="1">1 - Déconseillée</option>
+                </select>
               </div>
             </div>
           </div>
 
+          <div class="card-section">
+            <h2 class="section-title">Variables (max. 10)</h2>
+            <div class="variables-table">
+              <div class="variables-header">
+                <span>Label</span>
+                <span>Identifiant</span>
+                <span>Type</span>
+                <span>Obligatoire</span>
+                <span></span>
+              </div>
+              <div id="variablesBuilder"></div>
+            </div>
+            <button id="addVariableBtn" class="btn btn-secondary">
+              Ajouter une variable
+            </button>
+          </div>
+
+          <div class="card-section">
+            <h2 class="section-title">Prompt de la fiche</h2>
+            <p class="small-hint">
+              Utilisez les identifiants des variables entre <code>{{ }}</code>.
+              Exemple : <code>{{code_onu}}</code>
+            </p>
+            <textarea id="createPrompt"
+                      class="prompt-output"
+                      rows="6"
+                      placeholder="Tu es assistant de niveau RCH4..."></textarea>
+          </div>
+
+          <div class="card-section">
+            <button id="generateQrBtn" class="btn btn-primary btn-full-width">
+              Générer le JSON + QR code
+            </button>
+            <div id="createError" class="alert alert-error" hidden></div>
+          </div>
+
+          <div class="card-section card-section--split">
+            <div class="json-preview">
+              <h3 class="section-subtitle">JSON généré</h3>
+              <textarea id="generatedJson" class="prompt-output" readonly></textarea>
+            </div>
+            <div class="qr-preview">
+              <h3 class="section-subtitle">QR code</h3>
+              <div id="generatedQr"></div>
+              <button id="downloadQrBtn" class="btn btn-secondary" disabled>
+                Télécharger le QR code
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 
