@@ -799,11 +799,24 @@ function downloadGeneratedQr() {
     return;
   }
 
+  // Récupère les valeurs dynamiques
+  const categorie = document.getElementById("createCategorie").value.trim();
+  const titre = document.getElementById("createTitre").value.trim();
+  const version = document.getElementById("createVersion").value.trim();
+
+  // Construit le nom final
+  const nomFichier = (
+    (categorie ? categorie + "-" : "") +
+    (titre ? titre + "-" : "") +
+    (version ? version : "")
+  ).replace(/[^a-zA-Z0-9-_]/g, "_") + ".jpeg";
+
   const link = document.createElement("a");
-  link.href = canvas.toDataURL("image/png");
-  link.download = "fiche-ia-qr.png";
+  link.href = canvas.toDataURL("image/jpeg"); // Format jpeg demandé
+  link.download = nomFichier;
   link.click();
 }
+
 
 // =============================
 // Conversion compact -> long
